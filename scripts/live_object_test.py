@@ -5,15 +5,23 @@
 """
 End-to-end check of the object helpers against a live vault.
 
-Creates one throw-away eBook, then alters a property, adds three, empties one,
+Creates one throw-away object, then alters a property, adds three, empties one,
 removes one, deletes the object and finally destroys it, reading the object back after each
 step. Nothing else in the vault is touched: every write names the ID the create
 returned. If a step fails the run stops and prints that ID, so the object can
 be cleaned up by hand (search the vault for the title below).
 
-Object type, class and properties are resolved by name, as in SCHEMA.md.
+The object type, class and properties are the vault's own, given by name:
+  --object-type       an object type that can have files
+  --object-class      a class of that type (default: named like the object type)
+  --integer           an integer property; set at creation, then altered
+  --optional-integer  an integer property the class lists but does not require; added, then emptied
+  --multiline         a multi-line text property; added
+Keywords (26) is added and then removed, so the class must not list it.
 
-Usage: python scripts/live_object_test.py [--config client-config.toml] [--keep]
+Usage, e.g. for an "eBook" type:
+  python scripts/live_object_test.py --config client-config.toml --object-type eBook \\
+      --integer "Page count" --optional-integer "Publishing year" --multiline Source [--keep]
 """
 
 import argparse
@@ -27,7 +35,7 @@ from mfiles_grpc import Client, load_settings, objects, pb, structure, values
 TITLE = "mfiles-grpc live test object - safe to delete"
 NAME_OR_TITLE = 0
 SINGLE_FILE = 22
-KEYWORDS = 26  # not associated with the eBook class, so it can be removed
+KEYWORDS = 26  # must not be listed by the class, so it can be removed
 CLASS = 100
 
 log = logging.getLogger("live_object_test")
@@ -36,23 +44,23 @@ log = logging.getLogger("live_object_test")
 class Vault:
     """IDs of what the test writes, looked up by name."""
 
-    def __init__(self, client: Client):
+    def __init__(self, client: Client, names: argparse.Namespace):
         def prop(name, datatype):
             found = structure.property_def_by_name(client, name, datatype)
             if not found:
                 raise LookupError(f"No property definition {name!r}")
             return found.id
 
-        object_type = structure.object_type_by_name(client, "eBook")
-        object_class = structure.object_class_by_name(client, "eBook")
+        object_type = structure.object_type_by_name(client, names.object_type)
+        object_class = structure.object_class_by_name(client, names.object_class or names.object_type)
         if not object_type or not object_class:
-            raise LookupError("No eBook object type or class")
+            raise LookupError(f"No object type {names.object_type!r} or its class")
         self.object_type = object_type.id
         self.object_class = object_class.base_info.item_info.obj_id.item_id.internal_id
         self.class_value_list = next(p.value_list for p in structure.property_defs(client) if p.id == CLASS)
-        self.page_count = prop("Page count", pb.DATATYPE_INTEGER)
-        self.publishing_year = prop("Publishing year", pb.DATATYPE_INTEGER)
-        self.source = prop("Source", pb.DATATYPE_MULTI_LINE_TEXT)
+        self.page_count = prop(names.integer, pb.DATATYPE_INTEGER)
+        self.publishing_year = prop(names.optional_integer, pb.DATATYPE_INTEGER)
+        self.source = prop(names.multiline, pb.DATATYPE_MULTI_LINE_TEXT)
 
 
 def read(client: Client, vault: Vault, object_id: int, step: str) -> tuple[int, dict]:
@@ -78,7 +86,7 @@ def run(client: Client, vault: Vault, keep: bool) -> int:
         vault.page_count: values.integer(1),
     })
     object_id = created.object_info.obj_id.item_id.internal_id
-    print(f"1. Created eBook {object_id}")
+    print(f"1. Created object {object_id}")
     try:
         version, props = read(client, vault, object_id, "read back")
         check(props.get(NAME_OR_TITLE) == TITLE, "title as created")
@@ -121,7 +129,7 @@ def run(client: Client, vault: Vault, keep: bool) -> int:
         check(props.get(vault.page_count) == 2 and props.get(vault.source), "others kept")
 
         if keep:
-            print(f"--keep: leaving eBook {object_id} in the vault")
+            print(f"--keep: leaving object {object_id} in the vault")
             return 0
 
         objects.delete_object(client, t, object_id)
@@ -136,19 +144,24 @@ def run(client: Client, vault: Vault, keep: bool) -> int:
         print("All steps passed.")
         return 0
     except BaseException:
-        print(f"!! Stopped with eBook {object_id} ({TITLE!r}) still in the vault", file=sys.stderr)
+        print(f"!! Stopped with object {object_id} ({TITLE!r}) still in the vault", file=sys.stderr)
         raise
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default="client-config.toml", help="default: %(default)s")
+    parser.add_argument("--object-type", required=True, help="object type name")
+    parser.add_argument("--object-class", help="class name (default: the object type's name)")
+    parser.add_argument("--integer", required=True, help="integer property, set and altered")
+    parser.add_argument("--optional-integer", required=True, help="integer property, added and emptied")
+    parser.add_argument("--multiline", required=True, help="multi-line text property, added")
     parser.add_argument("--keep", action="store_true", help="stop before deleting the test object")
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING)
 
     with Client.connect(load_settings(args.config)) as client:
-        return run(client, Vault(client), args.keep)
+        return run(client, Vault(client, args), args.keep)
 
 
 if __name__ == "__main__":

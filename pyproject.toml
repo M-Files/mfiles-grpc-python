@@ -1,19 +1,37 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mfiles-grpc"
-version = "0.0.1"
+version = "0.1.0"
 description = "Python client for the M-Files gRPC API"
 readme = "README.md"
-requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
 authors = [
   { name = "Jari Turkia", email = "jatu@hqcodeshop.fi" }
 ]
+keywords = ["M-Files", "gRPC", "document management", "ECM"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Office/Business",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
+    # The stubs in _generated/ were made with grpcio-tools 1.84.0 (protobuf gencode 7.35.1).
+    # Each refuses an older runtime; protobuf also refuses a newer major version.
     "grpcio>=1.84.0",
-    "protobuf>=7.35.1",
+    "protobuf>=7.35.1,<8",
 ]
 
 [project.optional-dependencies]
@@ -22,7 +40,14 @@ dev = [
     "pytest>=9.0.2",
     "black>=26.3.1",
     "flake8>=7.3.0",
+    "build",
+    "twine",
 ]
+
+[project.urls]
+Homepage = "https://github.com/M-Files/mfiles-grpc-python"
+Source = "https://github.com/M-Files/mfiles-grpc-python"
+Issues = "https://github.com/M-Files/mfiles-grpc-python/issues"
 
 [project.scripts]
 mfiles-grpc = "mfiles_grpc.__main__:main"

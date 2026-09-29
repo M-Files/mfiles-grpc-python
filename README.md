@@ -7,15 +7,15 @@ gRPC has `IRPCPropertyDefsAdmin.AddPropertyDef`, `AddObjectClass`,
 `IRPCObjectTypesAdmin.AddObjectType` and a declarative whole-structure
 get/set (`IRPCDeclarativeMetadataStructure`).
 
-> **Not a supported public API.** The `.proto` comes from the M-Files Desktop
+> **Not a supported public API.** The protocol comes from the M-Files Desktop
 > client install and can change with any server update. Regenerate the stubs
-> (below) after upgrading, and run the tests.
+> (see [Source of the .proto](#source-of-the-proto)) after upgrading, and run the tests.
 
 ## Status
 
 | What | State |
 |---|---|
-| gRPC on the REST host, port 443, path `/MFiles.<Service>/<Method>` | verified live |
+| gRPC on the REST host and port (443 on M-Files Cloud), path `/MFiles.<Service>/<Method>` | verified live |
 | The `.proto` matches the server (live replies decode field for field) | verified live |
 | Anonymous calls (`GetServerCapabilities`, `GetPublicKeyAnonymous`) | verified live |
 | `LogIn` with user name and password → 48-byte session ID | verified live |
@@ -27,21 +27,24 @@ get/set (`IRPCDeclarativeMetadataStructure`).
 | Writing object properties (`set_properties`, with `expected_version` guard) | verified live (2026-09-24) |
 | `create_object`, `remove_properties`, `delete_object`, `destroy_object` | verified live (2026-09-24) |
 
-`scripts/live_object_test.py` repeats that live check against a vault: it
-creates a throwaway eBook, changes it, adds values, checks that a write aimed
-at an old version is refused, empties one value and removes another, then
-destroys the object. It **writes to the vault**; on failure it prints the ID
-it left behind. `--keep` skips the delete.
+Verified against an M-Files Cloud vault. `scripts/live_object_test.py` repeats
+the object checks against your vault: it creates a throwaway object, changes it,
+adds values, checks that a write aimed at an old version is refused, empties one
+value and removes another, then destroys the object. It **writes to the vault**;
+on failure it prints the ID it left behind. `--keep` skips the delete. You name
+an object type and properties of your own; see `--help`. For example:
 
 ```
-PYTHONPATH=src python scripts/live_object_test.py --config ../client-config.toml
+python scripts/live_object_test.py --config client-config.toml --object-type eBook \
+    --integer "Page count" --optional-integer "Publishing year" --multiline Source
 ```
 
 What it established:
 
 * Creating an object needs `value_metadata` on every value (the helper adds
   it); without it the server answers "Type mismatch."
-* An eBook cannot be created without `Single file` (22).
+* An object of a type that can have files cannot be created without
+  `Single file` (22).
 * A property the class lists cannot be removed, only set empty (null).
   `remove_properties` works only for properties the class does not list, such
   as `Keywords` (26).
@@ -126,13 +129,29 @@ use `MFILES_GRPC_TOKEN`.
 ## Install
 
 ```
-pip install -e ".[dev]"
+pip install mfiles-grpc
 ```
 
-Configuration is read from the same `client-config.toml` as the other tools in
-this repository (`[m-files.tool.common]`); the host and port are taken from
-`rest-api-url` (port 443 when the URL has none). An optional `[m-files.tool.grpc]`
-section overrides them:
+Python 3.11 or newer. For working on the package itself: `pip install -e ".[dev]"`.
+
+## Configure
+
+Settings are read from a TOML file, `client-config.toml` by default
+(`load_settings(path)`, `mfiles-grpc --config path`). The file holds the
+password, so keep it out of version control and readable only by you
+(`chmod 600`).
+
+```toml
+[m-files.tool.common]
+rest-api-url = "https://<vault>.cloudvault.m-files.com/REST/"
+vault = "{GUID}"          # the vault's GUID, with braces
+username = "..."          # for auth = "password"
+password = "..."
+```
+
+The gRPC host and port are taken from `rest-api-url` (port 443 when the URL has
+none). An optional `[m-files.tool.grpc]` section overrides them and chooses how
+to log in:
 
 ```toml
 [m-files.tool.grpc]
@@ -170,6 +189,8 @@ The capture contains the login request, **password included**; treat the proxy's
 log as secret. With SSO it contains the token instead, which is just as secret.
 
 ## Use
+
+The object type (101) and object (214) below are examples; use your vault's.
 
 ```python
 from mfiles_grpc import Client, load_settings, objects, structure, values, pb
@@ -255,7 +276,13 @@ comments that would otherwise raise `SyntaxWarning` on import.
 ## Tests
 
 ```
+pip install -e ".[dev]"
 pytest
+flake8 --max-line-length 120 --extend-exclude src/mfiles_grpc/_generated src tests scripts
 ```
 
-Offline; they need no vault.
+Offline; they need no vault. `scripts/live_object_test.py` is the live check.
+
+## License
+
+MIT; see [LICENSE](LICENSE).
