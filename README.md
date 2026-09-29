@@ -285,7 +285,7 @@ Offline; they need no vault. `scripts/live_object_test.py` is the live check.
 
 ## Releasing
 
-Every pull request merged to `main` is released; nothing is tagged or versioned by hand.
+Versions are never set by hand: every pull request merged to `main` gets the next one.
 
 1. The Tag workflow tags the merge commit with the next version. The pull request's labels
    choose the step:
@@ -297,8 +297,9 @@ Every pull request merged to `main` is released; nothing is tagged or versioned 
    | `major-version` | major | 1.2.3 → 2.0.0 |
 
    The first tag is `v1.0.0`.
-2. It then starts the Publish workflow on that tag, which builds the package, publishes it to
-   PyPI and creates the GitHub release.
+2. To release, create a GitHub release on that tag (Releases → Draft a new release). Publishing
+   it starts the Publish workflow, which builds the package, publishes it to PyPI and attaches
+   the wheel and the sdist to the release. A tag without a release is not published.
 
 The package version comes from the tag ([setuptools-scm](https://setuptools-scm.readthedocs.io/)),
 so `pyproject.toml` holds none. Running Publish by hand on a branch publishes a `.devN` version
