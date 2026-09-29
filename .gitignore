@@ -1,0 +1,19 @@
+# Working notes, not published
+PLAN.md
+
+# Build and test leftovers
+build/
+dist/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+
+# Never commit a real configuration: it holds the vault password
+client-config.toml
+proxide.log
+
+# M-Files' protocol file is not published; only the stubs generated from it are.
+# Keep a local copy here for scripts/generate_stubs.py.
+*.proto
