@@ -3,6 +3,8 @@ name: Publish
 # Trusted Publishing: PyPI and TestPyPI trust this workflow, so no API token is stored.
 #   Run by hand (Actions → Publish → Run workflow) → TestPyPI.
 #   Push a tag v<version>                          → PyPI.
+# Deployment environments are not available in this repository. The "release tags" ruleset
+# lets only repository admins create v* tags, so only they can release to PyPI.
 
 on:
   push:
@@ -48,9 +50,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/project/mfiles-grpc/
     permissions:
       id-token: write
     steps:
@@ -66,9 +65,6 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/project/mfiles-grpc/
     permissions:
       id-token: write
     steps:
