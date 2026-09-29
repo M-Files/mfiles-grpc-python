@@ -1,0 +1,75 @@
+name: Tag
+
+# When a pull request is merged to main, tag the merge commit with the next version and start
+# Publish on that tag. The pull request's labels choose the step:
+#   none           → patch  1.2.3 → 1.2.4
+#   minor-version  → minor  1.2.3 → 1.3.0
+#   major-version  → major  1.2.3 → 2.0.0
+# The first tag is v1.0.0.
+#
+# pull_request_target runs this file as it is on main, with a token that can write. It never
+# checks out or runs the pull request's code; it reads only the labels and the merge commit.
+# A tag created with GITHUB_TOKEN starts no workflow, so Publish is started with
+# workflow_dispatch, the one event GITHUB_TOKEN can trigger. The "release tags" ruleset lets
+# GitHub Actions create v* tags.
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SHA: ${{ github.event.pull_request.merge_commit_sha }}
+      LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+    steps:
+      - name: Next version
+        id: next
+        run: |
+          gh api --paginate "repos/$GH_REPO/git/matching-refs/tags/v" -q '.[] | .ref + " " + .object.sha' |
+          python3 -c '
+          import json, os, re, sys
+          labels = set(json.loads(os.environ["LABELS"]))
+          versions = []
+          for line in sys.stdin:
+              ref, sha = line.split()
+              if m := re.fullmatch(r"refs/tags/v(\d+)\.(\d+)\.(\d+)", ref):
+                  if sha == os.environ["SHA"]:
+                      sys.exit(f"::error::{ref} already tags {sha}")
+                  versions.append(tuple(map(int, m.groups())))
+          if not versions:
+              major, minor, patch = 1, 0, 0
+          else:
+              major, minor, patch = max(versions)
+              if "major-version" in labels:
+                  major, minor, patch = major + 1, 0, 0
+              elif "minor-version" in labels:
+                  minor, patch = minor + 1, 0
+              else:
+                  patch += 1
+          print(f"tag=v{major}.{minor}.{patch}")
+          ' >> "$GITHUB_OUTPUT"
+      - name: Create the tag
+        run: gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA" --silent
+        env:
+          TAG: ${{ steps.next.outputs.tag }}
+      - name: Start Publish
+        run: |
+          gh workflow run publish.yml --ref "$TAG"
+          echo "Tagged $SHA as $TAG and started Publish" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          TAG: ${{ steps.next.outputs.tag }}

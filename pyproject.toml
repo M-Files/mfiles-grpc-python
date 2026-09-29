@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=77.0"]
+requires = ["setuptools>=77.0", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mfiles-grpc"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Python client for the M-Files gRPC API"
 readme = "README.md"
 license = "MIT"
@@ -54,6 +54,12 @@ mfiles-grpc = "mfiles_grpc.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools_scm]
+# The version is the latest v* tag, which the Tag workflow creates on every merge to main.
+# Between tags it is a .devN version; the local "+g<hash>" part is dropped because PyPI
+# and TestPyPI refuse it.
+local_scheme = "no-local-version"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

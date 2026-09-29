@@ -283,6 +283,27 @@ flake8 --max-line-length 120 --extend-exclude src/mfiles_grpc/_generated src tes
 
 Offline; they need no vault. `scripts/live_object_test.py` is the live check.
 
+## Releasing
+
+Every pull request merged to `main` is released; nothing is tagged or versioned by hand.
+
+1. The Tag workflow tags the merge commit with the next version. The pull request's labels
+   choose the step:
+
+   | Label | Step | Example |
+   | --- | --- | --- |
+   | none | patch | 1.2.3 → 1.2.4 |
+   | `minor-version` | minor | 1.2.3 → 1.3.0 |
+   | `major-version` | major | 1.2.3 → 2.0.0 |
+
+   The first tag is `v1.0.0`.
+2. It then starts the Publish workflow on that tag, which builds the package, publishes it to
+   PyPI and creates the GitHub release.
+
+The package version comes from the tag ([setuptools-scm](https://setuptools-scm.readthedocs.io/)),
+so `pyproject.toml` holds none. Running Publish by hand on a branch publishes a `.devN` version
+to TestPyPI.
+
 ## License
 
 MIT; see [LICENSE](https://github.com/M-Files/mfiles-grpc-python/blob/main/LICENSE).
