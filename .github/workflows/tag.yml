@@ -9,7 +9,8 @@ name: Tag
 #
 # pull_request_target runs this file as it is on main, with a token that can write. It never
 # checks out or runs the pull request's code; it reads only the labels and the merge commit.
-# The "release tags" ruleset lets GitHub Actions create v* tags.
+# The "release tags" ruleset stops v* tags from being moved or deleted, but not created:
+# GITHUB_TOKEN cannot be given a ruleset bypass.
 #
 # Tagging publishes nothing: creating a GitHub release on the tag starts Publish.
 
