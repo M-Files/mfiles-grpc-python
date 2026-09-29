@@ -9,7 +9,7 @@ get/set (`IRPCDeclarativeMetadataStructure`).
 
 > **Not a supported public API.** The protocol comes from the M-Files Desktop
 > client install and can change with any server update. Regenerate the stubs
-> (see [Source of the .proto](#source-of-the-proto)) after upgrading, and run the tests.
+> (see [Source of the .proto](https://github.com/M-Files/mfiles-grpc-python#source-of-the-proto)) after upgrading, and run the tests.
 
 ## Status
 
@@ -285,4 +285,4 @@ Offline; they need no vault. `scripts/live_object_test.py` is the live check.
 
 ## License
 
-MIT; see [LICENSE](LICENSE).
+MIT; see [LICENSE](https://github.com/M-Files/mfiles-grpc-python/blob/main/LICENSE).
