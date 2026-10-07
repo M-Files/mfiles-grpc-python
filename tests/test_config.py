@@ -120,6 +120,36 @@ def test_unknown_auth_is_an_error(tmp_path):
         load_settings(str(path))
 
 
+def test_the_token_cache_is_off_unless_asked_for(tmp_path, monkeypatch):
+    monkeypatch.delenv("MFILES_GRPC_TOKEN", raising=False)
+    path = tmp_path / "client-config.toml"
+    path.write_text(SSO_CONFIG)
+    assert load_settings(str(path)).token_cache is None
+
+
+def test_token_cache_is_read_for_sso(tmp_path, monkeypatch):
+    monkeypatch.delenv("MFILES_GRPC_TOKEN", raising=False)
+    path = tmp_path / "client-config.toml"
+    path.write_text(SSO_CONFIG + 'token-cache = "keyring"\n')
+    s = load_settings(str(path))
+    assert s.token_cache == "keyring"
+    assert "token_cache='keyring'" in repr(s)
+
+
+def test_an_unknown_token_cache_is_an_error(tmp_path):
+    path = tmp_path / "client-config.toml"
+    path.write_text(SSO_CONFIG + 'token-cache = "file"\n')
+    with pytest.raises(ValueError, match="file"):
+        load_settings(str(path))
+
+
+def test_password_login_remembers_nothing(tmp_path):
+    # There is no browser sign-in to remember, so the setting is ignored rather than half-honoured.
+    path = tmp_path / "client-config.toml"
+    path.write_text(CONFIG + 'token-cache = "keyring"\n')
+    assert load_settings(str(path)).token_cache is None
+
+
 def test_token_comes_from_the_environment_and_is_hidden(tmp_path, monkeypatch):
     monkeypatch.setenv("MFILES_GRPC_TOKEN", "eyJsecret-token")
     path = tmp_path / "client-config.toml"

@@ -224,3 +224,151 @@ def test_acquire_token_runs_the_browser_round_trip():
     (_, form), _ = post.call_args
     assert form["code"] == "the-code"
     assert form["redirect_uri"] == redirect
+
+
+# --- Remembering the sign-in: the refresh token ---------------------------------------------
+
+class MemoryCache:
+    """A TokenCache over one variable; the calls are recorded for the tests to look at."""
+
+    def __init__(self, stored=None):
+        self.stored = stored
+        self.calls = []
+
+    def load(self):
+        self.calls.append("load")
+        return self.stored
+
+    def save(self, refresh_token):
+        self.calls.append(("save", refresh_token))
+        self.stored = refresh_token
+
+    def clear(self):
+        self.calls.append("clear")
+        self.stored = None
+
+
+class BrokenCache:
+    """A credential store that cannot be reached."""
+
+    def load(self):
+        raise sso.TokenCacheError("Cannot read the credential store: OSError")
+
+    def save(self, refresh_token):
+        raise sso.TokenCacheError("Cannot write the credential store: OSError")
+
+    def clear(self):
+        raise sso.TokenCacheError("Cannot clear the credential store: OSError")
+
+
+def no_browser(url):
+    raise AssertionError("the browser must not be opened")
+
+
+def browser_that_signs_in(url):
+    import urllib.request
+    q = {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
+    urllib.request.urlopen(f"{q['redirect_uri']}?code=the-code&state={q['state']}", timeout=5).read()
+
+
+def loopback_config(**overrides):
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    return config(RedirectURI=f"http://localhost:{port}/signin-oidc", **overrides)
+
+
+def test_refresh_sends_the_refresh_token_and_returns_the_new_tokens():
+    post = mock.Mock(return_value={"id_token": "ID-2", "refresh_token": "R-2"})
+    tokens = sso.refresh(config(), "R-1", post=post)
+    assert tokens == {"id_token": "ID-2", "refresh_token": "R-2"}
+    (url, form), _ = post.call_args
+    assert url == TOKEN
+    assert form == {"grant_type": "refresh_token", "client_id": "client-1", "refresh_token": "R-1"}
+
+
+def test_refresh_sends_the_client_secret_when_the_plugin_has_one():
+    post = mock.Mock(return_value={"access_token": "ACCESS"})
+    sso.refresh(config(UseAccessTokenInWeb="true", ClientSecret="s3cr3t"), "R-1", post=post)
+    (_, form), _ = post.call_args
+    assert form["client_secret"] == "s3cr3t"
+
+
+def test_refresh_without_the_wanted_token_is_an_error():
+    post = mock.Mock(return_value={"access_token": "ACCESS"})
+    with pytest.raises(sso.SsoError, match="id_token"):
+        sso.refresh(config(), "R-1", post=post)
+
+
+def test_a_remembered_sign_in_gets_a_token_without_the_browser():
+    cache = MemoryCache("R-1")
+    post = mock.Mock(return_value={"id_token": "ID-2"})
+    assert sso.acquire_token(config(), open_browser=no_browser, post=post, cache=cache) == "ID-2"
+    assert post.call_count == 1
+    assert cache.stored == "R-1"
+    assert ("save", "R-1") not in cache.calls
+
+
+def test_a_rotated_refresh_token_replaces_the_remembered_one():
+    # Some IdPs honour a refresh token once and issue the next in its answer. Keeping the old one
+    # would make the run after this one fail.
+    cache = MemoryCache("R-1")
+    post = mock.Mock(return_value={"id_token": "ID-2", "refresh_token": "R-2"})
+    sso.acquire_token(config(), open_browser=no_browser, post=post, cache=cache)
+    assert cache.stored == "R-2"
+
+
+def test_a_refresh_token_the_idp_refuses_is_forgotten_and_the_browser_signs_in():
+    cache = MemoryCache("R-old")
+
+    def post(url, form):
+        if form["grant_type"] == "refresh_token":
+            raise sso.SsoError("Token endpoint answered 400: invalid_grant")
+        return {"id_token": "ID-NEW", "refresh_token": "R-new"}
+
+    token = sso.acquire_token(loopback_config(), open_browser=browser_that_signs_in, post=post,
+                              cache=cache, timeout=10)
+    assert token == "ID-NEW"
+    assert "clear" in cache.calls
+    assert cache.stored == "R-new"
+
+
+def test_a_browser_sign_in_is_remembered_when_the_idp_issues_a_refresh_token():
+    cache = MemoryCache()
+    post = mock.Mock(return_value={"id_token": "ID", "refresh_token": "R-1"})
+    token = sso.acquire_token(loopback_config(), open_browser=browser_that_signs_in, post=post,
+                              cache=cache, timeout=10)
+    assert token == "ID"
+    assert cache.stored == "R-1"
+
+
+def test_a_browser_sign_in_without_a_refresh_token_remembers_nothing():
+    cache = MemoryCache()
+    post = mock.Mock(return_value={"id_token": "ID"})
+    sso.acquire_token(loopback_config(), open_browser=browser_that_signs_in, post=post,
+                      cache=cache, timeout=10)
+    assert cache.stored is None
+
+
+def test_without_a_cache_the_browser_is_used_as_before():
+    post = mock.Mock(return_value={"id_token": "ID", "refresh_token": "R-1"})
+    token = sso.acquire_token(loopback_config(), open_browser=browser_that_signs_in, post=post, timeout=10)
+    assert token == "ID"
+    assert post.call_count == 1
+
+
+def test_a_broken_credential_store_does_not_stop_the_sign_in(caplog):
+    post = mock.Mock(return_value={"id_token": "ID", "refresh_token": "R-1"})
+    token = sso.acquire_token(loopback_config(), open_browser=browser_that_signs_in, post=post,
+                              cache=BrokenCache(), timeout=10)
+    assert token == "ID"
+    assert "Cannot read the remembered sign-in" in caplog.text
+    assert "Cannot save the remembered sign-in" in caplog.text
+
+
+def test_no_token_reaches_the_log(caplog):
+    caplog.set_level("DEBUG")
+    cache = MemoryCache("R-secret-1")
+    post = mock.Mock(return_value={"id_token": "ID-secret", "refresh_token": "R-secret-2"})
+    sso.acquire_token(config(), open_browser=no_browser, post=post, cache=cache)
+    assert "secret" not in caplog.text

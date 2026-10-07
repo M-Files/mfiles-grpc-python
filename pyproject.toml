@@ -35,6 +35,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# token-cache = "keyring" remembers the SSO sign-in in the OS credential store.
+keyring = [
+    "keyring>=25.0",
+]
 dev = [
     "grpcio-tools>=1.84.0",
     "pytest>=9.0.2",

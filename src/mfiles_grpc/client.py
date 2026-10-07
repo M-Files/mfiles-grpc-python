@@ -20,7 +20,7 @@ from typing import Callable, Optional
 
 import grpc
 
-from . import sso
+from . import sso, token_cache
 from .config import ConnectionSettings
 from .proto import pb, rpc
 
@@ -129,7 +129,10 @@ class Client:
                 config = sso.discover(client, settings.vault)
                 if settings.sso_token:
                     config = dataclasses.replace(config, use_access_token=settings.sso_token == "access")
-                token = settings.token or sso.acquire_token(config)
+                # Without a cache the call is exactly what it was before the cache existed.
+                cache = token_cache.open_cache(settings.token_cache, settings.host, settings.vault)
+                cache_args = {} if cache is None else {"cache": cache}
+                token = settings.token or sso.acquire_token(config, **cache_args)
                 client.log_in_with_token(token, settings.vault, config.plugin_name, config.configuration_scope)
             else:
                 client.log_in(settings.username, settings.password, settings.vault)

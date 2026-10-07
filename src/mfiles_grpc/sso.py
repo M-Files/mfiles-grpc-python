@@ -37,6 +37,7 @@ from typing import Callable, Iterable, Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from .proto import pb
+from .token_cache import TokenCache, TokenCacheError
 from .values import to_python
 
 log = logging.getLogger(__name__)
@@ -204,12 +205,19 @@ def _post_form(url: str, form: dict) -> dict:
         raise SsoError(f"Token endpoint answered {e.code}: {e.read().decode('utf-8', 'replace')}") from e
 
 
-def exchange_code(config: OAuthConfig, code: str, verifier: str, redirect_uri: str,
-                  post: PostForm = _post_form) -> str:
+def _select_token(config: OAuthConfig, tokens: dict) -> str:
     """
-    :param redirect_uri: The one sent in the authorization URL; the IdP compares them
+    :param tokens: A token endpoint answer
     :return: The ID token, or the access token when the plugin asks for it
     """
+    wanted = "access_token" if config.use_access_token else "id_token"
+    if not tokens.get(wanted):
+        raise SsoError(f"Token endpoint returned no {wanted}; it returned: {', '.join(sorted(tokens))}")
+    return tokens[wanted]
+
+
+def _exchange_code_for_tokens(config: OAuthConfig, code: str, verifier: str, redirect_uri: str,
+                              post: PostForm) -> dict:
     form = {
         "grant_type": "authorization_code",
         "client_id": config.client_id,
@@ -219,11 +227,36 @@ def exchange_code(config: OAuthConfig, code: str, verifier: str, redirect_uri: s
     }
     if config.client_secret:
         form["client_secret"] = config.client_secret
+    return post(config.token_endpoint, form)
+
+
+def exchange_code(config: OAuthConfig, code: str, verifier: str, redirect_uri: str,
+                  post: PostForm = _post_form) -> str:
+    """
+    :param redirect_uri: The one sent in the authorization URL; the IdP compares them
+    :return: The ID token, or the access token when the plugin asks for it
+    """
+    return _select_token(config, _exchange_code_for_tokens(config, code, verifier, redirect_uri, post))
+
+
+def refresh(config: OAuthConfig, refresh_token: str, post: PostForm = _post_form) -> dict:
+    """
+    Trade a refresh token for new tokens, without a browser.
+
+    :param refresh_token: One the IdP issued for this client
+    :return: The token endpoint's answer. It carries a new refresh token when the IdP rotates them.
+    :raises SsoError: The IdP refused the token, or answered without the token the plugin wants
+    """
+    form = {
+        "grant_type": "refresh_token",
+        "client_id": config.client_id,
+        "refresh_token": refresh_token,
+    }
+    if config.client_secret:
+        form["client_secret"] = config.client_secret
     tokens = post(config.token_endpoint, form)
-    wanted = "access_token" if config.use_access_token else "id_token"
-    if not tokens.get(wanted):
-        raise SsoError(f"Token endpoint returned no {wanted}; it returned: {', '.join(sorted(tokens))}")
-    return tokens[wanted]
+    _select_token(config, tokens)
+    return tokens
 
 
 def loopback_address(redirect_uri: str) -> tuple[int, str]:
@@ -255,13 +288,77 @@ def _listen(port: int, handler) -> list[http.server.HTTPServer]:
     return servers
 
 
-def acquire_token(config: OAuthConfig, open_browser: Callable[[str], object] = webbrowser.open,
-                  post: PostForm = _post_form, timeout: float = 300) -> str:
+def _cached_call(what: str, call, default=None):
     """
-    Sign in through the browser.
+    :param what: What the call does, for the log
+    :param call: The credential store call to make
+    :return: Its result, or default when the store fails. A broken store must not stop a sign-in.
+    """
+    try:
+        return call()
+    except TokenCacheError as e:
+        log.warning("Cannot %s the remembered sign-in: %s", what, e)
+        return default
+
+
+def _remember(cache: TokenCache, tokens: dict, previous: Optional[str] = None) -> None:
+    """
+    :param tokens: A token endpoint answer
+    :param previous: The refresh token that was just used, if any
+    """
+    issued = tokens.get("refresh_token")
+    if issued:
+        if issued != previous:
+            if _cached_call("save", lambda: (cache.save(issued), True)[1], default=False):
+                log.info("Remembered the sign-in%s", " (the IdP rotated the refresh token)" if previous else "")
+    elif previous is None:
+        log.info("The IdP issued no refresh token, so this sign-in is not remembered")
+
+
+def _token_from_cache(config: OAuthConfig, cache: TokenCache, post: PostForm) -> Optional[str]:
+    """
+    :return: A token from the remembered refresh token, or None when none is remembered or the IdP
+        refuses it, in which case it is forgotten
+    """
+    remembered = _cached_call("read", cache.load)
+    if not remembered:
+        return None
+    try:
+        tokens = refresh(config, remembered, post)
+    except SsoError as e:
+        log.info("The remembered sign-in no longer works, signing in again: %s", e)
+        _cached_call("clear", cache.clear)
+        return None
+    log.info("Signed in with the remembered sign-in, without the browser")
+    _remember(cache, tokens, previous=remembered)
+    return _select_token(config, tokens)
+
+
+def acquire_token(config: OAuthConfig, open_browser: Callable[[str], object] = webbrowser.open,
+                  post: PostForm = _post_form, timeout: float = 300,
+                  cache: Optional[TokenCache] = None) -> str:
+    """
+    Get a token for LogIn: from the remembered sign-in when there is one, else through the browser.
 
     :param timeout: Seconds to wait for the user to finish signing in
+    :param cache: Where the refresh token is remembered, or None to sign in through the browser every
+        time. A sign-in through the browser is remembered when the IdP issues a refresh token.
     :return: See exchange_code()
+    """
+    if cache is not None:
+        token = _token_from_cache(config, cache, post)
+        if token:
+            return token
+    tokens = _sign_in_with_browser(config, open_browser, post, timeout)
+    if cache is not None:
+        _remember(cache, tokens)
+    return _select_token(config, tokens)
+
+
+def _sign_in_with_browser(config: OAuthConfig, open_browser: Callable[[str], object],
+                          post: PostForm, timeout: float) -> dict:
+    """
+    :return: The token endpoint's answer to the authorization code
     """
     port, path = loopback_address(config.redirect_uri)
     redirect_uri = config.redirect_uri
@@ -300,4 +397,4 @@ def acquire_token(config: OAuthConfig, open_browser: Callable[[str], object] = w
             server.shutdown()
             server.server_close()
     code = parse_callback(answer["query"], state)
-    return exchange_code(config, code, verifier, redirect_uri, post=post)
+    return _exchange_code_for_tokens(config, code, verifier, redirect_uri, post)

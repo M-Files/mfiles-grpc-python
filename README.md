@@ -126,6 +126,41 @@ land in shell history or process listings.
 On Linux, binding port 80 needs root or `CAP_NET_BIND_SERVICE`. Without either,
 use `MFILES_GRPC_TOKEN`.
 
+### Signing in once, not on every run
+
+By default every run opens the browser, and an MFA vault asks for MFA each time.
+`token-cache = "keyring"` remembers the sign-in instead:
+
+```
+pip install "mfiles-grpc[keyring]"
+```
+
+```toml
+[m-files.tool.grpc]
+auth = "sso"
+token-cache = "keyring"
+```
+
+* The first run signs in through the browser as before. When the IdP issues a
+  refresh token (the vault's scopes include `offline_access`), it is kept in the
+  operating system's credential store (Windows Credential Manager, macOS
+  Keychain, or the Secret Service on Linux) under the host and the vault GUID.
+* Later runs trade the refresh token for a new token with one call to the IdP.
+  There is no browser and no MFA, until the IdP expires or revokes the refresh
+  token. Then the browser opens again. An IdP that rotates refresh tokens is
+  handled: the new one replaces the old.
+* Only the refresh token is stored. It is never written to a file, a log line or
+  a `repr`. A credential store that cannot be reached is logged and ignored: the
+  sign-in goes on without remembering.
+* **A refresh token is a credential.** Whoever can read it can sign in as you to
+  that vault without MFA. The credential store protects it with your operating
+  system login. Leave this off on a shared account or a machine you do not trust.
+* `mfiles-grpc forget-token` removes it. A token in `MFILES_GRPC_TOKEN` always
+  wins, and `auth = "password"` ignores the setting.
+* Two runs refreshing at the same moment can race when the IdP rotates refresh
+  tokens: the loser's token is already used, and its next run falls back to the
+  browser. The library does not lock across processes.
+
 ## Install
 
 ```
@@ -160,6 +195,7 @@ address = "localhost:4443"     # connect here instead, e.g. a capturing proxy
 ca-cert = "proxide_ca.crt"     # trust these root certificates (PEM) instead of the system's
 auth = "sso"                   # "password" (default) or "sso"; see above
 sso-token = "access"           # optional: "id" or "access"
+token-cache = "keyring"        # optional: remember the SSO sign-in; see "Signing in once"
 ```
 
 ### Capturing traffic through a proxy
@@ -216,6 +252,7 @@ mfiles-grpc capabilities    # anonymous; does the host speak gRPC?
 mfiles-grpc auth-config     # anonymous; the vault's SSO settings
 mfiles-grpc login           # are the credentials good?
 mfiles-grpc check-session   # is the session accepted?
+mfiles-grpc forget-token    # remove the sign-in token-cache remembers
 mfiles-grpc structure       # object types, classes, custom properties
 ```
 
