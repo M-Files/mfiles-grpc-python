@@ -202,6 +202,25 @@ def test_connect_with_sso_discovers_signs_in_and_logs_in():
     log_in.assert_called_once_with("ID-TOKEN", "{VAULT}", "Entra", "scope-1")
 
 
+def test_connect_with_a_token_cache_hands_it_to_the_sign_in():
+    config = mock.Mock(plugin_name="Entra", configuration_scope="")
+    with mock.patch.object(sso, "discover", return_value=config), \
+            mock.patch.object(sso, "acquire_token", return_value="T") as acquire, \
+            mock.patch.object(Client, "log_in_with_token"):
+        Client.connect(sso_settings(host="Vault.Example", vault="{aaaa}", token_cache="keyring")).close()
+    cache = acquire.call_args.kwargs["cache"]
+    assert cache.entry == "vault.example|AAAA"
+
+
+def test_connect_without_a_token_cache_signs_in_exactly_as_before():
+    config = mock.Mock(plugin_name="Entra", configuration_scope="")
+    with mock.patch.object(sso, "discover", return_value=config), \
+            mock.patch.object(sso, "acquire_token", return_value="T") as acquire, \
+            mock.patch.object(Client, "log_in_with_token"):
+        Client.connect(sso_settings()).close()
+    acquire.assert_called_once_with(config)
+
+
 def test_connect_with_a_given_token_skips_the_browser():
     config = mock.Mock(plugin_name="Entra", configuration_scope="")
     with mock.patch.object(sso, "discover", return_value=config), \

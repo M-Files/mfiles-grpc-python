@@ -7,6 +7,7 @@ Command line checks for an M-Files gRPC connection.
     mfiles-grpc auth-config      anonymous; shows the vault's SSO (OAuth) settings
     mfiles-grpc login            logs in and out; proves the credentials
     mfiles-grpc check-session    logs in and makes one read that needs the session
+    mfiles-grpc forget-token     removes the sign-in that token-cache remembers
     mfiles-grpc structure        lists object types, classes and property definitions
 """
 
@@ -16,7 +17,7 @@ import sys
 
 from google.protobuf import json_format
 
-from . import sso, structure
+from . import sso, structure, token_cache
 from .client import Client, SessionNotAccepted
 from .config import load_settings
 from .proto import pb
@@ -75,6 +76,20 @@ def _check_session(args, settings) -> int:
     return 0
 
 
+def _forget_token(args, settings) -> int:
+    cache = token_cache.open_cache(settings.token_cache, settings.host, settings.vault)
+    if cache is None:
+        print('Nothing is remembered: token-cache is not set in the settings file.')
+        return 0
+    try:
+        cache.clear()
+    except token_cache.TokenCacheError as e:
+        print(f"Not cleared: {e}", file=sys.stderr)
+        return 1
+    print(f"Forgot the remembered sign-in for {settings.host}")
+    return 0
+
+
 def _structure(args, settings) -> int:
     with Client.connect(settings) as client:
         print("Object types:")
@@ -102,6 +117,7 @@ def main(argv=None) -> int:
     commands.add_parser("auth-config").set_defaults(run=_auth_config)
     commands.add_parser("login").set_defaults(run=_login)
     commands.add_parser("check-session").set_defaults(run=_check_session)
+    commands.add_parser("forget-token").set_defaults(run=_forget_token)
     commands.add_parser("structure").set_defaults(run=_structure)
 
     args = parser.parse_args(argv)
